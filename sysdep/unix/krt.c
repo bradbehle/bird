@@ -608,6 +608,7 @@ krt_flush_routes(struct krt_proto *p)
 static struct rte *
 krt_export_net(struct krt_proto *p, net *net, rte **rt_free, ea_list **tmpa)
 {
+  DBG("In krt_export_net\n");
   struct announce_hook *ah = p->p.main_ahook;
   struct filter *filter = ah->out_filter;
   rte *rt;
@@ -685,6 +686,7 @@ krt_same_dest(rte *k, rte *e)
 void
 krt_got_route(struct krt_proto *p, rte *e)
 {
+  DBG("Entering krt_got_route: not sure what this does yet\n");
   net *net = e->net;
   int verdict;
 
@@ -790,6 +792,7 @@ krt_got_route(struct krt_proto *p, rte *e)
 static void
 krt_prune(struct krt_proto *p)
 {
+  DBG("Entering krt_prune\n");
   struct rtable *t = p->p.table;
 
   KRT_TRACE(p, D_EVENTS, "Pruning table %s", t->name);

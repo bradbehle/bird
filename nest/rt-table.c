@@ -207,20 +207,35 @@ rte_better(rte *new, rte *old)
 static int
 rte_mergable(rte *pri, rte *sec)
 {
+  DBG("In rte_mergable\n");
   int (*mergable)(rte *, rte *);
 
   if (!rte_is_valid(pri) || !rte_is_valid(sec))
+  {
+    DBG("rte_mergable: at least one not valid, pri=%d, sec=%d\n", pri, sec);
+    if (pri && sec)
+        DBG("REF_FILTERED is set on at least one, pri->flags=%x, sec->flags=%x\n", pri->flags, sec->flags);
     return 0;
+  }
 
   if (pri->pref != sec->pref)
+  {
+    DBG("prefs %d != %d\n", pri->pref, sec->pref);
     return 0;
+  }
 
-  if (pri->attrs->src->proto->proto != sec->attrs->src->proto->proto)
+  if (pri->attrs->src->proto->proto != sec->attrs->src->proto->proto) {
+    DBG("protos not equal %s != %s\n", pri->attrs->src->proto->proto->name, sec->attrs->src->proto->proto->name);
     return 0;
+  }
 
   if (mergable = pri->attrs->src->proto->rte_mergable)
+  {
+    DBG("Calling proto->mergabale(%d, %d)\n", pri, sec);
     return mergable(pri, sec);
+  }
 
+  DBG("Could not get mergable function for proto %s\n", pri->attrs->src->proto->proto->name);
   return 0;
 }
 
@@ -247,6 +262,7 @@ rte_trace_out(uint flag, struct proto *p, rte *e, char *msg)
 static rte *
 export_filter_(struct announce_hook *ah, rte *rt0, rte **rt_free, ea_list **tmpa, linpool *pool, int silent)
 {
+  DBG("In export_filter_\n");
   struct proto *p = ah->proto;
   struct filter *filter = ah->out_filter;
   struct proto_stats *stats = ah->stats;
@@ -293,12 +309,14 @@ export_filter_(struct announce_hook *ah, rte *rt0, rte **rt_free, ea_list **tmpa
     }
 
  accept:
+  DBG("export_filter_: accepting\n");
   if (rt != rt0)
     *rt_free = rt;
   return rt;
 
  reject:
   /* Discard temporary rte */
+  DBG("export_filter_: rejecting\n");
   if (rt != rt0)
     rte_free(rt);
   return NULL;
@@ -594,7 +612,12 @@ rt_notify_accepted(struct announce_hook *ah, net *net, rte *new_changed, rte *ol
 static struct mpnh *
 mpnh_merge_rta(struct mpnh *nhs, rta *a, linpool *pool, int max)
 {
-  struct mpnh nh = { .gw = a->gw, .iface = a->iface };
+  // For private clusters, we want to use the orig_gw and not the next hop for the route
+  // so use orig_gw here when creating a multipath route
+  ip_addr the_gw = a->gw;
+  if (!ipa_equal(a->orig_gw, IPA_NONE))
+    the_gw = a->orig_gw;
+  struct mpnh nh = { .gw = the_gw, .iface = a->iface };
   struct mpnh *nh2 = (a->dest == RTD_MULTIPATH) ? a->nexthops : &nh;
   return mpnh_merge(nhs, nh2, 1, 0, max, pool);
 }
@@ -602,6 +625,7 @@ mpnh_merge_rta(struct mpnh *nhs, rta *a, linpool *pool, int max)
 rte *
 rt_export_merged(struct announce_hook *ah, net *net, rte **rt_free, ea_list **tmpa, linpool *pool, int silent)
 {
+  DBG("In rt_export_merged\n");
   // struct proto *p = ah->proto;
   struct mpnh *nhs = NULL;
   rte *best0, *best, *rt0, *rt, *tmp;
@@ -634,12 +658,14 @@ rt_export_merged(struct announce_hook *ah, net *net, rte **rt_free, ea_list **tm
       rte_free(tmp);
   }
 
+  DBG("In rt_export_merged: About to check nhs: %d, best->attrs->orig_gw=%x\n", nhs, best->attrs->orig_gw);
   if (nhs)
   {
     nhs = mpnh_merge_rta(nhs, best->attrs, pool, ah->proto->merge_limit);
 
     if (nhs->next)
     {
+      DBG("In rt_export_merged: About to set RTD_MULTIPATH\n");
       best = rte_cow_rta(best, pool);
       best->attrs->dest = RTD_MULTIPATH;
       best->attrs->nexthops = nhs;
@@ -658,7 +684,7 @@ rt_notify_merged(struct announce_hook *ah, net *net, rte *new_changed, rte *old_
 		 rte *new_best, rte*old_best, int refeed)
 {
   // struct proto *p = ah->proto;
-
+  DBG("In rt_notify_merged\n");
   rte *new_best_free = NULL;
   rte *old_best_free = NULL;
   rte *new_changed_free = NULL;
@@ -667,6 +693,7 @@ rt_notify_merged(struct announce_hook *ah, net *net, rte *new_changed, rte *old_
 
   /* We assume that all rte arguments are either NULL or rte_is_valid() */
 
+  DBG("new_best=%d, old_best=%d, refeed=%d\n", new_best, old_best, refeed);
   /* This check should be done by the caller */
   if (!new_best && !old_best)
     return;
@@ -674,6 +701,7 @@ rt_notify_merged(struct announce_hook *ah, net *net, rte *new_changed, rte *old_
   /* Check whether the change is relevant to the merged route */
   if ((new_best == old_best) && !refeed)
   {
+    DBG("In ((new_best == old_best) && !refeed)\n");
     new_changed = rte_mergable(new_best, new_changed) ?
       export_filter(ah, new_changed, &new_changed_free, NULL, 1) : NULL;
 
@@ -681,7 +709,10 @@ rt_notify_merged(struct announce_hook *ah, net *net, rte *new_changed, rte *old_
       export_filter(ah, old_changed, &old_changed_free, NULL, 1) : NULL;
 
     if (!new_changed && !old_changed)
+    {
+      DBG("new_changed and old_changed are both NULL\n");
       return;
+    }
   }
 
   if (new_best)
@@ -698,8 +729,12 @@ rt_notify_merged(struct announce_hook *ah, net *net, rte *new_changed, rte *old_
   if (old_best && !refeed)
     old_best = export_filter(ah, old_best, &old_best_free, NULL, 1);
 
+  DBG("rt_notify_merged: old_best=%d, new_best=%d\n", old_best, new_best);
   if (new_best || old_best)
+  {
+    DBG("In (new_best || old_best)\n");
     do_rt_notify(ah, net, new_best, old_best, tmpa, refeed);
+  }
 
   /* Discard temporary rte's */
   if (new_best_free)
@@ -857,6 +892,7 @@ static inline int rte_is_ok(rte *e) { return e && !rte_is_filtered(e); }
 static void
 rte_recalculate(struct announce_hook *ah, net *net, rte *new, struct rte_src *src)
 {
+  DBG("In rte_recalculate\n");
   struct proto *p = ah->proto;
   struct rtable *table = ah->table;
   struct proto_stats *stats = ah->stats;
@@ -882,6 +918,7 @@ rte_recalculate(struct announce_hook *ah, net *net, rte *new, struct rte_src *sr
 	   */
 	  if (old->sender->proto != p)
 	    {
+        DBG("rte_recalculate: old->sender->proto(%s) != p(%s)\n", old->sender->proto->proto->name, p->proto->name);
 	      if (new)
 		{
 		  log_rl(&rl_pipe, L_ERR "Pipe collision detected when sending %I/%d to table %s",
@@ -894,7 +931,7 @@ rte_recalculate(struct announce_hook *ah, net *net, rte *new, struct rte_src *sr
 	  if (new && rte_same(old, new))
 	    {
 	      /* No changes, ignore the new route */
-
+        DBG("rte_recalculate: No changes, ignore the new route\n");
 	      if (!rte_is_filtered(new))
 		{
 		  stats->imp_updates_ignored++;
@@ -962,7 +999,10 @@ rte_recalculate(struct announce_hook *ah, net *net, rte *new, struct rte_src *sr
 	  rte_trace_in(D_FILTERS, p, new, "ignored [limit]");
 
 	  if (ah->in_keep_filtered)
+    {
+      DBG("rte_recalculate: ah->in_keep_filtered true, so setting REF_FILTERED\n");
 	    new->flags |= REF_FILTERED;
+    }
 	  else
 	    { rte_free_quick(new); new = NULL; }
 
@@ -1191,6 +1231,7 @@ rte_unhide_dummy_routes(net *net, rte **dummy)
 void
 rte_update2(struct announce_hook *ah, net *net, rte *new, struct rte_src *src)
 {
+  DBG("In rte_update2\n");
   struct proto *p = ah->proto;
   struct proto_stats *stats = ah->stats;
   struct filter *filter = ah->in_filter;
@@ -1219,6 +1260,7 @@ rte_update2(struct announce_hook *ah, net *net, rte *new, struct rte_src *src)
 	    goto drop;
 
 	  /* new is a private copy, i could modify it */
+    DBG("rte_update2: filter == FILTER_REJECT, so setting REF_FILTERED\n");
 	  new->flags |= REF_FILTERED;
 	}
       else
@@ -1236,6 +1278,7 @@ rte_update2(struct announce_hook *ah, net *net, rte *new, struct rte_src *src)
 		  if (! ah->in_keep_filtered)
 		    goto drop;
 
+      DBG("rte_update2: fr > F_ACCEPT, so setting REF_FILTERED\n");
 		  new->flags |= REF_FILTERED;
 		}
 	      if (tmpa != old_tmpa && src->proto->store_tmp_attrs)
@@ -2437,6 +2480,8 @@ rt_show_rte(struct cli *c, byte *ia, rte *e, struct rt_show_data *d, ea_list *tm
 static void
 rt_show_net(struct cli *c, net *n, struct rt_show_data *d)
 {
+  DBG("In rt_show_net\n");
+
   rte *e, *ee;
   byte ia[STD_ADDRESS_P_LENGTH+8];
   struct ea_list *tmpa;

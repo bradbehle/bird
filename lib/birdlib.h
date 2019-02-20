@@ -160,7 +160,7 @@ void bug(const char *msg, ...) NORET;
 void debug(const char *msg, ...);		/* Printf to debug output */
 
 /* Debugging */
-
+#define GLOBAL_DEBUG "True"
 #if defined(LOCAL_DEBUG) || defined(GLOBAL_DEBUG)
 #define DBG(x, y...) debug(x, ##y)
 #else

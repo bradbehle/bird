@@ -1120,6 +1120,7 @@ bgp_rte_update(struct bgp_proto *p, ip_addr prefix, int pxlen,
   e->net = n;
   e->pflags = 0;
   e->u.bgp.suppressed = 0;
+  DBG("BGP: Calling rte_update2(...)\n");
   rte_update2(p->p.main_ahook, n, e, *src);
 }
 
@@ -1238,10 +1239,14 @@ bgp_do_rx_update(struct bgp_conn *conn,
       DECODE_PREFIX(nlri, nlri_len);
       DBG("Add %I/%d\n", prefix, pxlen);
 
-      if (a0)
+      if (a0) {
+  DBG("Calling bgp_rte_update\n");
 	bgp_rte_update(p, prefix, pxlen, path_id, &last_id, &src, a0, &a);
-      else /* Forced withdraw as a result of soft error */
+      }
+      else /* Forced withdraw as a result of soft error */ {
+  DBG("Calling bgp_rte_withdraw\n");  
 	bgp_rte_withdraw(p, prefix, pxlen, path_id, &last_id, &src);
+      }
     }
 
  done:
@@ -1249,7 +1254,10 @@ bgp_do_rx_update(struct bgp_conn *conn,
     rta_free(a);
 
   if (err)
+  {
+    DBG("Calling bgp_error\n"); 
     bgp_error(conn, 3, err, NULL, 0);
+  }
 
   return;
 }

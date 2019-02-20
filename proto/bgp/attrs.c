@@ -1179,6 +1179,7 @@ bgp_community_filter(struct bgp_proto *p, rte *e)
 int
 bgp_import_control(struct proto *P, rte **new, ea_list **attrs, struct linpool *pool)
 {
+  DBG("In bgp_import_control\n");
   rte *e = *new;
   struct bgp_proto *p = (struct bgp_proto *) P;
   struct bgp_proto *new_bgp = (e->attrs->src->proto->proto == &proto_bgp) ?
@@ -1363,6 +1364,7 @@ bgp_rte_better(rte *new, rte *old)
 int
 bgp_rte_mergable(rte *pri, rte *sec)
 {
+  DBG("In bgp_rte_mergable(%d, %d)\n", pri, sec);
   struct bgp_proto *pri_bgp = (struct bgp_proto *) pri->attrs->src->proto;
   struct bgp_proto *sec_bgp = (struct bgp_proto *) sec->attrs->src->proto;
   eattr *x, *y;
@@ -1370,19 +1372,26 @@ bgp_rte_mergable(rte *pri, rte *sec)
 
   /* Skip suppressed routes (see bgp_rte_recalculate()) */
   if (pri->u.bgp.suppressed != sec->u.bgp.suppressed)
+  {
+    DBG("bgp_rte_mergable: suppressed values don't match\n");
     return 0;
-
+  }
   /* RFC 4271 9.1.2.1. Route resolvability test */
   if (!rte_resolvable(sec))
+  {
+    DBG("bgp_rte_mergable: sec is not resolvable\n");
     return 0;
-
+  }
   /* Start with local preferences */
   x = ea_find(pri->attrs->eattrs, EA_CODE(EAP_BGP, BA_LOCAL_PREF));
   y = ea_find(sec->attrs->eattrs, EA_CODE(EAP_BGP, BA_LOCAL_PREF));
   p = x ? x->u.data : pri_bgp->cf->default_local_pref;
   s = y ? y->u.data : sec_bgp->cf->default_local_pref;
   if (p != s)
+  {
+    DBG("bgp_rte_mergable: local prefs don't match\n");
     return 0;
+  }
 
   /* RFC 4271 9.1.2.2. a)  Use AS path lengths */
   if (pri_bgp->cf->compare_path_lengths || sec_bgp->cf->compare_path_lengths)
@@ -1393,8 +1402,10 @@ bgp_rte_mergable(rte *pri, rte *sec)
       s = y ? as_path_getlen(y->u.ptr) : AS_PATH_MAXLEN;
 
       if (p != s)
-	return 0;
-
+  {
+    DBG("bgp_rte_mergable: AS lengths don't match\n");
+	  return 0;
+  }
 //      if (DELTA(p, s) > pri_bgp->cf->relax_multipath)
 //	return 0;
     }
@@ -1405,7 +1416,10 @@ bgp_rte_mergable(rte *pri, rte *sec)
   p = x ? x->u.data : ORIGIN_INCOMPLETE;
   s = y ? y->u.data : ORIGIN_INCOMPLETE;
   if (p != s)
+  {
+    DBG("bgp_rte_mergable: Origins don't match\n");
     return 0;
+  }
 
   /* RFC 4271 9.1.2.2. c) Compare MED's */
   if (pri_bgp->cf->med_metric || sec_bgp->cf->med_metric ||
@@ -1416,21 +1430,32 @@ bgp_rte_mergable(rte *pri, rte *sec)
       p = x ? x->u.data : pri_bgp->cf->default_med;
       s = y ? y->u.data : sec_bgp->cf->default_med;
       if (p != s)
-	return 0;
+  {
+    DBG("bgp_rte_mergable: metrics don't match\n");
+	  return 0;
+  }
     }
 
   /* RFC 4271 9.1.2.2. d) Prefer external peers */
   if (pri_bgp->is_internal != sec_bgp->is_internal)
+  {
+    DBG("bgp_rte_mergable: is_internal doesn't match\n");
     return 0;
+  }
 
+  DBG("bgp_rte_mergable: pri_bgp->cf->igp_metric=%d, pri->attrs->igp_metric=%d\n", pri_bgp->cf->igp_metric, pri->attrs->igp_metric);
+  DBG("bgp_rte_mergable: sec_bgp->cf->igp_metric=%d, sec->attrs->igp_metric=%d\n", sec_bgp->cf->igp_metric, sec->attrs->igp_metric);
   /* RFC 4271 9.1.2.2. e) Compare IGP metrics */
   p = pri_bgp->cf->igp_metric ? pri->attrs->igp_metric : 0;
   s = sec_bgp->cf->igp_metric ? sec->attrs->igp_metric : 0;
   if (p != s)
+  {
+    DBG("bgp_rte_mergable: igp_metric doesn't match, p=%d != s=%d\n", p, s);
     return 0;
-
+  }
   /* Remaining criteria are ignored */
 
+  DBG("Returning true from bgp_rte_mergable\n");
   return 1;
 }
 

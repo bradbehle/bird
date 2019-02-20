@@ -238,12 +238,17 @@ nl_error(struct nlmsghdr *h, int ignore_esrch)
 static struct nlmsghdr *
 nl_get_scan(void)
 {
+  DBG("In nl_get_scan\n");
   struct nlmsghdr *h = nl_get_reply(&nl_scan);
 
   if (h->nlmsg_type == NLMSG_DONE)
+  {
+    DBG("In nl_get_scan: NLMSG_DONE\n");
     return NULL;
+  }
   if (h->nlmsg_type == NLMSG_ERROR)
     {
+      DBG("In nl_get_scan: NLMSG_ERROR\n");
       nl_error(h, 0);
       return NULL;
     }
@@ -253,7 +258,87 @@ nl_get_scan(void)
 static int
 nl_exchange(struct nlmsghdr *pkt, int ignore_esrch)
 {
-  struct nlmsghdr *h;
+    DBG("nl_exchange: sending packet\n");
+
+    struct nlmsghdr *h;
+    int i=0;
+    int rc=0;
+    int rem = 0;
+    int rem2 = 0;
+    int flags = 0;
+    int error_rc =0;
+
+    struct nlmsghdr *nlh;
+    struct nlmsgerr *nlme;
+    struct nl_msg *msg;
+    struct nlattr *attr;
+
+    // For loop to go through all netlink messages that are about to be sent
+    // nlh will always be a pointer to the current message, rem will always be set to number of remaining bytes
+///    nlmsg_for_each_msg(nlh, (struct nlmsghdr *) pkt, rc, rem) {
+///        u16 type = nlh->nlmsg_type;
+//			switch (nlh->nlmsg_type) {
+//			case NLMSG_ERROR: // error and ACK
+//			case NLMSG_DONE:
+//			case NLMSG_OVERRUN:
+//			case NLMSG_NOOP:
+
+///        u32 flags = nlh->nlmsg_flags; // NLM_F_MULTI, NLMSG_DONE, etc
+
+// How to look at these flags:
+//if ((msg->nm_nlh->nlmsg_flags & NLM_F_MULTI) && (msg->nm_nlh->nlmsg_type & NLMSG_DONE))
+//{
+  // do something here
+//}
+//HERE ARE THE FLAGS
+//#define NLM_F_REQUEST		1	/* It is request message. 	*/
+//#define NLM_F_MULTI		2	/* Multipart message, terminated by NLMSG_DONE */
+//#define NLM_F_ACK		4	/* Reply with ack, with zero or error code */
+//#define NLM_F_ECHO		8	/* Echo this request 		*/
+//#define NLM_F_DUMP_INTR		16	/* Dump was inconsistent due to sequence change */
+//#define NLM_F_DUMP_FILTERED	32	/* Dump was filtered as requested */
+
+/* Modifiers to GET request */
+//#define NLM_F_ROOT	0x100	/* specify tree	root	*/
+//#define NLM_F_MATCH	0x200	/* return all matching	*/
+//#define NLM_F_ATOMIC	0x400	/* atomic GET		*/
+//#define NLM_F_DUMP	(NLM_F_ROOT|NLM_F_MATCH)
+
+/* Modifiers to NEW request */
+//#define NLM_F_REPLACE	0x100	/* Override existing		*/
+//#define NLM_F_EXCL	0x200	/* Do not touch, if it exists	*/
+//#define NLM_F_CREATE	0x400	/* Create, if it does not exist	*/
+//#define NLM_F_APPEND	0x800	/* Add to end of list		*/
+// ADD		NLM_F_CREATE|NLM_F_EXCL
+
+///        struct nlmsgerr *nlme = nlmsg_data(nlh); // get pointer to head of payload for the message
+//        nlme->error; // probably don't need this
+
+///        DBG("nl_exchange: nlh->nlmsg_type=%x, nlh->nlmsg_flags, nlme->error=%x\n", type, flags, nlme->error);
+
+/**
+ * nlmsg_for_each_attr - iterate over a stream of attributes
+ * @pos: loop counter, set to current attribute
+ * @nlh: netlink message header
+ * @hdrlen: length of familiy specific header
+ * @rem: initialized to len, holds bytes currently remaining in stream
+ */
+//#define nlmsg_for_each_attr(pos, nlh, hdrlen, rem) \
+//	nla_for_each_attr(pos, nlmsg_attrdata(nlh, hdrlen), \
+//			  nlmsg_attrlen(nlh, hdrlen), rem)
+
+///        struct nlattr * nla;
+///        nlmsg_for_each_attr(nla, nlh, NLMSG_HDRLEN, rem2) {
+///            u16 attr_len = nla->nla_len;
+///            u16 attr_type = nla->nla_type;
+///            DBG("nl_exchange:     nla_len=%d, nla_type=%d\n", attr_len, attr_type);
+
+//          if (attr_type == ???) {
+//            u32 data = nla_get_u32(nla);
+//          }
+//          void *attr_data = nla_data(nla);
+///        }
+///    }
 
   nl_send(&nl_req, pkt);
   for(;;)
@@ -458,6 +543,9 @@ nl_close_nexthop(struct nlmsghdr *h, struct rtnexthop *nh)
 static void
 nl_add_multipath(struct nlmsghdr *h, unsigned bufsize, struct mpnh *nh)
 {
+  struct iface* i;
+  i = if_find_by_name("tunl0");
+
   struct rtattr *a = nl_open_attr(h, bufsize, RTA_MULTIPATH);
 
   for (; nh; nh = nh->next)
@@ -466,9 +554,20 @@ nl_add_multipath(struct nlmsghdr *h, unsigned bufsize, struct mpnh *nh)
 
     rtnh->rtnh_flags = 0;
     rtnh->rtnh_hops = nh->weight;
-    rtnh->rtnh_ifindex = nh->iface->index;
-
-    nl_add_attr_ipa(h, bufsize, RTA_GATEWAY, nh->gw);
+    /*
+     * Proof of concept for private clusters, set the route up using
+     * tunnel device tunl0
+     */
+    if (i) {
+      rtnh->rtnh_ifindex = i->index;
+      rtnh->rtnh_flags |= RTNH_F_ONLINK;
+      nl_add_attr_ipa(h, bufsize, RTA_GATEWAY, nh->gw);
+      DBG("nl_add_multipath(index=%d,nh_gw=%x)\n", i->index, nh->gw);
+    } else {
+      rtnh->rtnh_ifindex = nh->iface->index;
+      nl_add_attr_ipa(h, bufsize, RTA_GATEWAY, nh->gw);
+      DBG("nl_add_multipath_notunl0(index=%d,nh_gw=%x)\n", nh->iface->index, nh->gw);
+    }
 
     nl_close_nexthop(h, rtnh);
   }
@@ -887,8 +986,10 @@ nl_send_route(struct krt_proto *p, rte *e, struct ea_list *eattrs, int op, int d
     char buf[128 + KRT_METRICS_MAX*8 + nh_bufsize(a->nexthops)];
   } r;
   struct iface* i;
-
-  DBG("nl_send_route(%I/%d,op=%x)\n", net->n.prefix, net->n.pxlen, op);
+  u32 ifaceIdx = 99999;
+  if (iface)
+    ifaceIdx = iface->index;
+  DBG("nl_send_route(%I/%d,op=%x,dest=%d,gw=%x,iface->index=%d)\n", net->n.prefix, net->n.pxlen, op, dest, gw, ifaceIdx);
 
   bzero(&r.h, sizeof(r.h));
   bzero(&r.r, sizeof(r.r));
@@ -920,6 +1021,8 @@ nl_send_route(struct krt_proto *p, rte *e, struct ea_list *eattrs, int op, int d
     priority = KRT_CF->sys.metric;
   else if ((op != NL_OP_DELETE) && (ea = ea_find(eattrs, EA_KRT_METRIC)))
     priority = ea->u.data;
+
+  DBG("nl_send_route priority=%d\n", priority);
 
   if (priority)
     nl_add_attr_u32(&r.h, sizeof(r), RTA_PRIORITY, priority);
@@ -962,15 +1065,18 @@ dest:
     {
     case RTD_ROUTER:
       r.r.rtm_type = RTN_UNICAST;
-      if ((ea = ea_find(eattrs, EA_KRT_TUNNEL)) &&
-          (i = if_find_by_name(ea->u.ptr->data)))
+      if (i = if_find_by_name("tunl0"))
       {
         /*
-         * Tunnel attribute is set, so set the route up using the specified tunnel device
-         * to the originator of the route.
+         * Proof of concept for private clusters, Set the route up using
+         * tunnel device tunl0
          */
         nl_add_attr_u32(&r.h, sizeof(r), RTA_OIF, i->index);
-        nl_add_attr_ipa(&r.h, sizeof(r), RTA_GATEWAY, a->orig_gw);
+        ip_addr the_gw = a->orig_gw;
+        if (ipa_equal(the_gw, IPA_NONE)) {
+          the_gw = gw;
+        }
+        nl_add_attr_ipa(&r.h, sizeof(r), RTA_GATEWAY, the_gw);
         r.r.rtm_flags |= RTNH_F_ONLINK;
       }
       else
@@ -978,22 +1084,27 @@ dest:
          nl_add_attr_u32(&r.h, sizeof(r), RTA_OIF, iface->index);
          nl_add_attr_ipa(&r.h, sizeof(r), RTA_GATEWAY, gw);
       }
+      DBG("nl_send_route RTD_ROUTER\n");
       break;
     case RTD_DEVICE:
       r.r.rtm_type = RTN_UNICAST;
       nl_add_attr_u32(&r.h, sizeof(r), RTA_OIF, iface->index);
+      DBG("nl_send_route RTD_DEVICE\n");
       break;
     case RTD_BLACKHOLE:
       r.r.rtm_type = RTN_BLACKHOLE;
       break;
     case RTD_UNREACHABLE:
       r.r.rtm_type = RTN_UNREACHABLE;
+      DBG("nl_send_route RTD_UNREACHABLE\n");
       break;
     case RTD_PROHIBIT:
       r.r.rtm_type = RTN_PROHIBIT;
+      DBG("nl_send_route RTD_PROHIBIT\n");
       break;
     case RTD_MULTIPATH:
       r.r.rtm_type = RTN_UNICAST;
+      DBG("nl_send_route(multipath: %I/%d,op=%x,dest=%d)\n", net->n.prefix, net->n.pxlen, op, dest);
       nl_add_multipath(&r.h, sizeof(r), a->nexthops);
       break;
     case RTD_NONE:
@@ -1002,6 +1113,7 @@ dest:
       bug("krt_capable inconsistent with nl_send_route");
     }
 
+  DBG("nl_send_route(About to nl_exchange: op=%x,dest=%d)\n", op, dest);
   /* Ignore missing for DELETE */
   return nl_exchange(&r.h, (op == NL_OP_DELETE));
 }
@@ -1087,17 +1199,26 @@ nl_alloc_mpnh(struct nl_parse_state *s, ip_addr gw, struct iface *iface, byte we
 static int
 nl_mergable_route(struct nl_parse_state *s, net *net, struct krt_proto *p, uint priority, uint krt_type)
 {
+  DBG("Entered nl_mergable_route\n");
   /* Route merging must be active */
   if (!s->merge)
     return 0;
 
   /* Saved and new route must have same network, proto/table, and priority */
   if ((s->net != net) || (s->proto != p) || (s->krt_metric != priority))
+  {
+    DBG("nl_mergable_route, not mergable, different net, proto, or metric/prio\n");
     return 0;
+  }
 
   /* Both must be regular unicast routes */
   if ((s->krt_type != RTN_UNICAST) || (krt_type != RTN_UNICAST))
+  {
+    DBG("nl_mergable_route, not mergable, not both unicast\n");
     return 0;
+  }
+
+  DBG("Exiting nl_mergable_route, returning mergable\n");
 
   return 1;
 }
@@ -1105,6 +1226,7 @@ nl_mergable_route(struct nl_parse_state *s, net *net, struct krt_proto *p, uint 
 static void
 nl_announce_route(struct nl_parse_state *s)
 {
+  DBG("Entering nl_announce_route: Not sure what this does yet, can call krt_got_route\n");
   rte *e = rte_get_temp(s->attrs);
   e->net = s->net;
   e->u.krt.src = s->krt_src;
@@ -1225,30 +1347,39 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
       break;
 
     case RTPROT_KERNEL:
+      DBG("nl_parse_route: KRT_SRC_KERNEL, returning...\n");
       src = KRT_SRC_KERNEL;
       return;
 
     case RTPROT_BIRD:
       if (!s->scan)
 	SKIP("echo\n");
+      DBG("nl_parse_route: KRT_SRC_BIRD\n");
       src = KRT_SRC_BIRD;
       break;
 
     case RTPROT_BOOT:
+      DBG("nl_parse_route: RTPROT_BOOT (KRT_SRC_ALIEN)\n");
     default:
       src = KRT_SRC_ALIEN;
     }
 
   net *net = net_get(p->p.table, dst, i->rtm_dst_len);
 
+  DBG("nl_parse_route: net=%d\n", net);
   if (s->net && !nl_mergable_route(s, net, p, priority, i->rtm_type))
+  {
+    DBG("nl_parse_route: net != NULL and non-mergable route so calling nl_announce_route(s)\n");
     nl_announce_route(s);
-
+  }
   rta *ra = lp_allocz(s->pool, sizeof(rta));
   ra->src = p->p.main_source;
   ra->source = RTS_INHERIT;
   ra->scope = SCOPE_UNIVERSE;
   ra->cast = RTC_UNICAST;
+
+
+  DBG("nl_parse_route: Handling different types of routes now, RTN_UNICAST, BLACKHOLE, etc: i->rtm_type: %d\n", i->rtm_type);
 
   switch (i->rtm_type)
     {
@@ -1256,6 +1387,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
       if (a[RTA_MULTIPATH] && (i->rtm_family == AF_INET))
 	{
+    DBG("nl_parse_route: a[RTA_MULTIPATH] and i->rtm_family == AF_INET\n");
 	  ra->dest = RTD_MULTIPATH;
 	  ra->nexthops = nl_parse_multipath(p, a[RTA_MULTIPATH]);
 	  if (!ra->nexthops)
@@ -1269,6 +1401,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 	}
 
       ra->iface = if_find_by_index(oif);
+      DBG("nl_parse_route: ra->iface=%d\n", ra->iface);
       if (!ra->iface)
 	{
 	  log(L_ERR "KRT: Received route %I/%d with unknown ifindex %u",
@@ -1282,6 +1415,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 	  ra->dest = RTD_ROUTER;
 	  memcpy(&ra->gw, RTA_DATA(a[RTA_GATEWAY]), sizeof(ra->gw));
 	  ipa_ntoh(ra->gw);
+    DBG("nl_parse_route: ra->gw=%x\n", ra->gw); // TODO: try to change this to the ip_addr string
 
 #ifdef IPV6
 	  /* Silently skip strange 6to4 routes */
@@ -1299,18 +1433,22 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 	}
       else
 	{
+    DBG("nl_parse_route: not a[RTA_GATEWAY], setting dest to RTD_DEVICE\n");
 	  ra->dest = RTD_DEVICE;
 	  def_scope = RT_SCOPE_LINK;
 	}
 
       break;
     case RTN_BLACKHOLE:
+      DBG("nl_parse_route: RTN_BLACKHOLE\n");
       ra->dest = RTD_BLACKHOLE;
       break;
     case RTN_UNREACHABLE:
+      DBG("nl_parse_route: RTN_UNREACHABLE\n");
       ra->dest = RTD_UNREACHABLE;
       break;
     case RTN_PROHIBIT:
+      DBG("nl_parse_route: RTN_PROHIBIT\n");
       ra->dest = RTD_PROHIBIT;
       break;
     /* FIXME: What about RTN_THROW? */
@@ -1334,6 +1472,8 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
   if (a[RTA_PREFSRC])
     {
+      DBG("nl_parse_route: a[RTA_PREFSRC]\n");
+
       ip_addr ps;
       memcpy(&ps, RTA_DATA(a[RTA_PREFSRC]), sizeof(ps));
       ipa_ntoh(ps);
@@ -1353,6 +1493,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
   if (a[RTA_FLOW])
     {
+      DBG("nl_parse_route: a[RTA_FLOW]\n");
       ea_list *ea = lp_alloc(s->pool, sizeof(ea_list) + sizeof(eattr));
       ea->next = ra->eattrs;
       ra->eattrs = ea;
@@ -1366,6 +1507,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
   if (a[RTA_METRICS])
     {
+      DBG("nl_parse_route: a[RTA_METRICS]\n");
       u32 metrics[KRT_METRICS_MAX];
       ea_list *ea = lp_alloc(s->pool, sizeof(ea_list) + KRT_METRICS_MAX * sizeof(eattr));
       int t, n = 0;
@@ -1389,6 +1531,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
       if (n > 0)
         {
+    DBG("nl_parse_route: about to set ea->next and EALF_SORTED\n");
 	  ea->next = ra->eattrs;
 	  ea->flags = EALF_SORTED;
 	  ea->count = n;
@@ -1404,6 +1547,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
 
   if (!s->net)
   {
+    DBG("nl_parse_route: Store the new route\n");
     /* Store the new route */
     s->net = net;
     s->attrs = ra;
@@ -1416,6 +1560,7 @@ nl_parse_route(struct nl_parse_state *s, struct nlmsghdr *h)
   }
   else
   {
+    DBG("nl_parse_route: Merge next hops with stored route\n");
     /* Merge next hops with the stored route */
     rta *a = s->attrs;
 

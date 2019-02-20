@@ -12,3 +12,6 @@
 /bird.log
 dist
 configure.lineno
+.DS_Store
+Notes.txt
+other_includes/
